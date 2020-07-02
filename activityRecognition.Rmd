@@ -7,6 +7,37 @@ output:
             keep_md: true
 ---
 
+## Overview
+
+Human Activity Recognition - HAR - has emerged as a key research area in the last years and is gaining increasing attention by the pervasive computing research community (see picture below, that illustrates the increasing number of publications in HAR with wearable accelerometers), especially for the development of context-aware systems. There are many potential applications for HAR, like: elderly monitoring, life log systems for monitoring energy expenditure and for supporting weight-loss programs, and digital assistants for weight lifting exercises
+
+Six young health participants were asked to perform one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl in five different fashions: exactly according to the specification (Class A), throwing the elbows to the front (Class B), lifting the dumbbell only halfway (Class C), lowering the dumbbell only halfway (Class D) and throwing the hips to the front (Class E).
+
+## Source
+
+The data for this project come from this source: http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har. If you use the document you create for this class for any purpose please cite them as they have been very generous in allowing their data to be used for this kind of assignment.
+
+### Installing Packages & Loading Libraries
+
+Let us install & load libraries that we will require further for building and testing our prediction model.
+
+```{r library, warning=FALSE,message=FALSE}
+#install.packages("doParallel")
+#install.packages("caret")
+#install.packages("randomForest")
+#install.packages("e1071")
+#install.packages("corrplot")
+require(doParallel)
+require(caret)
+require(randomForest)
+require(e1071)
+library(corrplot)
+```
+
+### Loading the DataSet
+
+Let us download & load the dataset in memory.
+
 ```{r dataSet,cache=FALSE}
 if(!dir.exists("activityData")){
       trainURL <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
@@ -15,7 +46,97 @@ if(!dir.exists("activityData")){
       download.file(trainURL, destfile = "./activityData/training.csv")
       download.file(testURL, destfile = "./activityData/testing.csv")
 }
-training <- read.csv(file = "./activityData/training.csv")
-testing <- read.csv(file = "./activityData/testing.csv")
+#NA values can be indentified as "NA", "#DIV/0!", "" which are taken care.
+training <- read.csv(file = "./activityData/training.csv", na.strings = c("NA", "#DIV/0!", ""))
+testing <- read.csv(file = "./activityData/testing.csv", na.strings = c("NA", "#DIV/0!", ""))
 ```
 
+### Cleaning and Transforming DataSet
+
+In our dataset, we contain additional data(qualitative data & time variables) which are not required for our analysis. We remove these attributes from our training and testing datasets. We also remove the variables that have majority of NULL values from both the datasets.
+
+```{r cleanTransform}
+training <- subset(training, select = -c(1:7))
+testing <- subset(testing, select = -c(1:7))
+sub <- colSums(is.na(training[,1:ncol(training)])) == 0
+training <- training[,sub]
+dim(training)
+testing <- testing[,sub]
+dim(testing)
+```
+
+### Exploring DataSet
+
+From the below code we can see that no attributes have variance near value zero and that is the reason we need to preprocess our data by scaling our dataset.
+
+```{r explore}
+nzv(training, saveMetrics = FALSE)
+
+cor_mat <- cor(training[, -53])
+corrplot(cor_mat, order = "FPC", method = "color", type = "upper", 
+         tl.cex = 0.8, tl.col = rgb(0, 0, 0))
+```
+
+##Prediction Model
+
+Now, that our dataset is ready let us build a model that will help us predict whether a given person is doing the weight-lifting correct or is he/she facing trouble in their form.
+
+### Partitioning Data for Validation Set
+
+We need to verfiy that our model works correctly and so we need to partition our training data in two groups for training and validation purposes.
+
+```{r dataPartition}
+inTrain <- createDataPartition(y = training$classe, p = 0.7, list = FALSE)
+modTrain <- training[inTrain,]
+modTest <- training[-inTrain,]
+```
+
+### Model Building - Prediction
+
+As our dataset is large we would prefer performing parallel computation for training our model to reduce time. We will be using random forest to train our model with k = 4 cross validation.
+
+```{r model}
+ncores <- makeCluster(detectCores() - 1)
+registerDoParallel(cores = ncores)
+getDoParWorkers()
+modFit <- train(classe ~ ., data = training, method = "rf", 
+                preProcess = c("center","scale"), metric = "Accuracy",
+                trControl = trainControl(method = "cv", number = 4, 
+                                         p = 0.7, allowParallel = TRUE))
+stopCluster(ncores)
+modFit
+```
+
+
+### Model Validation 
+
+Our model gives us a good accuracy measures. Let's see how our model performs on the validation set.
+
+```{r validation}
+predModTest <- predict(modFit, newdata = modTest)
+cmV <- confusionMatrix(predModTest, modTest$classe)
+cmV$table
+cmV
+```
+
+We see that our model has predicted with Accuracy : `r (cmV$overall['Accuracy'])*100` %. This is a very good accuracy rate.
+
+```{r plots}
+plot(modFit, main = "Accuracy w.r.t. Number of variables of Model Fit")
+
+plot(cmV$table, col = cmV$byClass,
+     main = paste("Random Forest Confusion Matrix: Accuracy =", 
+                  round(cmV$overall['Accuracy'], 4)))
+
+modFit$finalModel$classes
+```
+
+### Testing Model on Testing Dataset
+
+Let us predict the outcome based on the testing set for which we do not have the results.
+
+```{r test}
+predTestDataSet <- predict(modFit, newdata = testing)
+names(predTestDataSet) <- c(1:20)
+predTestDataSet
+```
