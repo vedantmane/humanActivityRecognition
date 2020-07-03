@@ -2,9 +2,10 @@
 title: "Human Activity Recognition"
 author: "Vedant Mane"
 date: "July 1, 2020"
-output: 
-      html_document: 
-            keep_md: true
+output:
+  pdf_document: default
+  html_document:
+    keep_md: yes
 ---
 
 ## Overview
